@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>আঁকিবুঁকি | Aankibuki</title>
+<link rel="stylesheet" href="/src/style.css">
+<meta name="theme-color" content="#eadfc4">
+<meta name="application-name" content="আঁকিবুঁকি">
+<meta name="apple-mobile-web-app-title" content="আঁকিবুঁকি">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+</head>
+<body>
+<div id="fps">FPS</div><button id="clock">দুপুর</button>
+<div id="joy"><div id="knob"></div></div>
+<button id="qual" class="hb"></button><button id="snd" class="hb">🔊</button>
+<button id="bell" class="tb">ঘণ্টা</button><button id="brake" class="tb">ব্রেক</button>
+<button id="set" class="hb">⚙</button>
+<div id="modes"></div><div id="bsel"></div><div id="eng"><i></i></div><button id="act" class="tb"></button>
+<div id="panel">
+  <div class="row"><b>সেটিং</b><button id="pclose" class="seg">✕</button></div>
+  <label>শব্দ<input id="vol" type="range" min="0" max="100"></label>
+  <div class="row">নিয়ন্ত্রণ<span><button id="cj" class="seg">জয়স্টিক</button> <button id="cb" class="seg">বাটন</button></span></div>
+  <div class="row">মান<button id="pq" class="seg"></button></div>
+</div>
+<button id="left" class="tb">◀</button><button id="right" class="tb">▶</button><button id="gas" class="tb">গ্যাস</button>
+<div id="rot"><span>ফোন আড়াআড়ি ঘোরালে ভালো খেলা যায়</span></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
