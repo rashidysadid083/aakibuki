@@ -26,6 +26,32 @@ export function combine(parts) {
   return { geo: out, half, mid };
 }
 
+// দোচালা প্রিজম (খড়ের চালের জন্য): মাথা z-অক্ষ বরাবর, ভিত y=0, চূড়া y=h; ফ্ল্যাট-শেডিংয়ের জন্য নন-ইনডেক্সড
+export function gable(w, h, d) {
+  const a = [-w / 2, 0, -d / 2], b = [w / 2, 0, -d / 2], c = [0, h, -d / 2];
+  const e = [w / 2, 0, d / 2], dd = [-w / 2, 0, d / 2], f = [0, h, d / 2];
+  const tris = [[b, a, c], [dd, e, f], [b, c, f], [b, f, e], [a, f, c], [a, dd, f], [a, b, e], [a, e, dd]];
+  const arr = new Float32Array(tris.length * 9);
+  tris.forEach((t, i) => t.forEach((v, j) => arr.set(v, i * 9 + j * 3)));
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+// অনেক অংশ জুড়ে একটা জিওমেট্রি, বিশ্বের স্থানাঙ্কেই থাকে (combine-এর মতো কেন্দ্রে আনে না)
+export function mergeWorld(parts) {
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'color']) {
+    const total = parts.reduce((s, p) => s + p.attributes[name].array.length, 0);
+    const arr = new Float32Array(total);
+    let o = 0;
+    for (const p of parts) { arr.set(p.attributes[name].array, o); o += p.attributes[name].array.length; }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, 3));
+  }
+  return out;
+}
+
 export let TREE, HOUSE, BLD;
 export function initProps() {
   TREE = combine([
@@ -51,17 +77,23 @@ export function initProps() {
 
 }
 
+// def.mat থাকলে সেই মেটেরিয়াল (না থাকলে propMat); def.shell থাকলে আউটলাইন হবে ওই সহজ বাক্সে (জটিল দালানে হালকা)
 export function addProps(parent, def, list, t) {
   if (!list.length) return;
-  const body = new THREE.InstancedMesh(def.geo, propMat, list.length);
-  const shell = new THREE.InstancedMesh(def.geo, inkMat, list.length);
+  const sh = def.shell, sgeo = sh ? sh.geo : def.geo, shalf = sh ? sh.half : def.half, so = sh ? sh.off : null;
+  const body = new THREE.InstancedMesh(def.geo, def.mat || propMat, list.length);
+  const shell = new THREE.InstancedMesh(sgeo, inkMat, list.length);
   list.forEach((p, i) => {
     dummy.position.set(p.x, p.y + def.half.y * p.s, p.z);
     dummy.rotation.y = p.ry;
     dummy.scale.setScalar(p.s);
     dummy.updateMatrix();
     body.setMatrixAt(i, dummy.matrix);
-    dummy.scale.set(p.s * (1 + t / def.half.x), p.s * (1 + t / def.half.y), p.s * (1 + t / def.half.z));
+    if (so) { // আউটলাইন-বাক্সের কেন্দ্র মূল জিওমেট্রির কেন্দ্র থেকে সরানো, ঘুরিয়ে বসাই
+      const cs = Math.cos(p.ry), sn = Math.sin(p.ry);
+      dummy.position.set(p.x + (so.x * cs + so.z * sn) * p.s, p.y + (def.half.y + so.y) * p.s, p.z + (-so.x * sn + so.z * cs) * p.s);
+    }
+    dummy.scale.set(p.s * (1 + t / shalf.x), p.s * (1 + t / shalf.y), p.s * (1 + t / shalf.z));
     dummy.updateMatrix();
     shell.setMatrixAt(i, dummy.matrix);
   });

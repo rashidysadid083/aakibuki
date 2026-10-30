@@ -3,6 +3,11 @@ import { initCore } from './core.js';
 import { initNoise } from './noise.js';
 import { initProps } from './props.js';
 import { initRoads } from './roads.js';
+import { initVillage } from './village.js';
+import { initFacade } from './facade.js';
+import { initBazaar } from './bazaar.js';
+import { initTown } from './town.js';
+import { FEAT } from './config.js';
 import { roadCoord } from './terrain.js';
 import { initWorld, prebuildChunks } from './chunks.js';
 import { initVehicles } from './vehicles.js';
@@ -26,6 +31,10 @@ function init() {
   initNoise();       // সিমপ্লেক্স নয়েজের তালিকা
   initProps();       // গাছ আর বাড়ির জিওমেট্রি
   initRoads();       // রাস্তার টেক্সচার, মেটেরিয়াল, বাতিস্তম্ভ
+  initVillage();     // গ্রামের জিনিস: চালা ঘর, বট, কলা, বাঁশ
+  initFacade();      // দালান/দোকানের atlas (বাংলা সাইনবোর্ডসহ)
+  if (FEAT.bazaar) initBazaar();  // বাজারের দোকান, শামিয়ানা, স্টল
+  if (FEAT.town) initTown();      // বহুতল দালান
   initWorld();       // জমির মেটেরিয়াল
   initVehicles();    // গাড়ির মেটেরিয়াল + প্রথম গাড়ি
   initInput();       // কিবোর্ড + জয়স্টিক

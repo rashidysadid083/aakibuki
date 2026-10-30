@@ -92,7 +92,7 @@ export function fly(dt) {
   const r = flyStep(dt, p, gy, water, pIn, readSteer(), !!(GS.boostHeld || keys.ShiftLeft || keys.ShiftRight || keys.KeyB));
   const h = p.y - gy;
   GS.airH = h;
-  if (h < 6 && collide(p, K.r)) S.v *= 0.75; // গাছ-ঘরের কাছে নিচু দিয়ে উড়লে ধাক্কা
+  if (h < 34 && collide(p, K.r, h)) S.v *= 0.75; // গাছ-ঘরের কাছে নিচু দিয়ে উড়লে ধাক্কা (প্রতিটা বস্তুর নিজের উচ্চতা collide-এ দেখা হয়)
   if (h < 2.5) collideParked(p, K.r, null);
   if (r.landed) { finishLanding(); return; }
   fwd.set(Math.sin(S.yaw), 0, Math.cos(S.yaw));
