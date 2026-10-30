@@ -3,7 +3,7 @@ import { scene, bands } from './core.js';
 import { CS, CSEG, STEP, WATER, FEAT } from './config.js';
 import { mulberry32, SEED } from './rng.js';
 import { simplex } from './noise.js';
-import { heightAt, surfaceAt, nearestRoad, NR, roadYaw, zoneAt } from './terrain.js';
+import { heightAt, surfaceAt, nearestRoad, NR, roadYaw, zoneAt, railDist } from './terrain.js';
 import { addProps, TREE, BLD } from './props.js';
 import { roadStrip, addLamps } from './roads.js';
 import { washTexture } from './textures.js';
@@ -11,6 +11,7 @@ import { GS } from './state.js';
 import { villageExtras, villageDecorate } from './village.js';
 import { isBazaar, bazaarLayout, bazaarDecorate } from './bazaar.js';
 import { TOWER } from './town.js';
+import { hwyLayout, hwyDecorate } from './highway.js';
 
 const PADDY = new THREE.Color(0xc4cf72);
 
@@ -25,16 +26,18 @@ function layout(cx, cz) {
   const r = mulberry32(((cx * 73856093) ^ (cz * 19349663) ^ SEED) >>> 0);
   const x0 = cx * CS, z0 = cz * CS;
   const zone = zoneAt(x0 + CS / 2, z0 + CS / 2);
+  const buildings = [], trees = [], cols = [];
   let kind = zone > 0.5 ? 'town' : zone > 0.05 ? 'village' : 'rural';
   if (FEAT.bazaar && isBazaar(cx, cz)) kind = 'bazaar'; // ৪খ: মোড়ের বাজার
+  const hx = FEAT.highway ? hwyLayout(cx, cz, cols, trees) : null; // ৪ঘ: গার্ডরেল, গাছের সারি, ওভারব্রিজ, রেললাইন, ক্রসিং
+  if (hx && hx.hasHwy && kind !== 'bazaar') kind = 'highway'; // হাইওয়ের chunk-এ বাড়ি নেই
   const newTown = FEAT.town && kind === 'town'; // ৪গ: বাস্তব মাপের বহুতল দালান
-  const cap = { town: 8, village: 5, rural: 0, bazaar: 0 }[kind];
+  const cap = { town: 8, village: 5, rural: 0, bazaar: 0, highway: 0 }[kind];
   const gap = newTown ? 9.2 : kind === 'town' ? 8.5 : 7.5;
-  const buildings = [], trees = [], cols = [];
   for (let i = 0; i < 30 && buildings.length < cap; i++) {
     const x = x0 + r() * CS, z = z0 + r() * CS, a = r(), b = r();
     if (surfaceAt(x, z) !== 'grass' || NR.d < (newTown ? 9 : 7) || NR.d > (newTown ? 19 : 17)) continue; // বহুতলের কিনারা যেন ফুটপাত না ঢাকে
-    if (buildings.some(o => Math.hypot(o.x - x, o.z - z) < gap)) continue;
+    if (buildings.some(o => Math.hypot(o.x - x, o.z - z) < gap) || railDist(x, z) < 9) continue; // রেললাইনের গায়ে বাড়ি নয়
     const ry = newTown ? faceRoad(x, z) : roadYaw(NR.axis, NR.idx, NR.t) + (a - 0.5) * 0.2; // শহরে সামনের দিক রাস্তামুখী
     const s = newTown ? 1 : kind === 'town' ? 0.9 + b * 0.5 : 0.9 + b * 0.25; // বহুতলে মাপ বদলায় না, নইলে জানালার মাপ বিগড়ায়
     const o = newTown ? 3.5 : 2.5;
@@ -44,16 +47,16 @@ function layout(cx, cz) {
     buildings.push({ x, z, y, s, type, ry });
     cols.push(newTown ? { x, z, r: TOWER[type].r, hh: TOWER[type].hh } : { x, z, r: (type === 'H' ? 3.3 : type === 'C' ? 3.1 : 3.5) * s });
   }
-  const tries = { town: 4, village: 10, rural: 14, bazaar: 0 }[kind];
+  const tries = { town: 4, village: 10, rural: 14, bazaar: 0, highway: 6 }[kind];
   for (let i = 0; i < tries; i++) {
     const x = x0 + r() * CS, z = z0 + r() * CS, s = 0.8 + r() * 0.7, ry = r() * 6.283;
-    if (surfaceAt(x, z) !== 'grass' || NR.d < 5.5) continue;
+    if (surfaceAt(x, z) !== 'grass' || NR.d < (kind === 'highway' ? 11 : 5.5) || railDist(x, z) < 7) continue; // হাইওয়ের সারির জায়গা ছেড়ে
     if (buildings.some(o => Math.hypot(o.x - x, o.z - z) < (newTown ? 7.5 : 6))) continue;
     trees.push({ x, z, y: heightAt(x, z), ry, s });
     cols.push({ x, z, r: 0.6 * s });
   }
   const ex = kind === 'bazaar' ? bazaarLayout(cx, cz, cols) : kind === 'town' || !FEAT.village ? null : villageExtras(r, kind, x0, z0, buildings, trees, cols); // ৪খ বাজার / ৪ক পুকুর, ধানক্ষেত, বট, কলা, বাঁশ
-  return { kind, buildings, trees, cols, ex };
+  return { kind, buildings, trees, cols, ex, hx };
 }
 
 // শহরের দুই ধরনের বাড়ি (ওপরে নিচের অংশ এক জিওমেট্রিতে)
@@ -63,6 +66,7 @@ function decorate(mesh, cx, cz) {
   for (const type of ['H', 'C', 'A', 'B', 'D']) addProps(mesh, BLD[type], L.buildings.filter(b => b.type === type), 0.1);
   addProps(mesh, TREE, L.trees, 0.08);
   if (L.ex) (L.kind === 'bazaar' ? bazaarDecorate : villageDecorate)(mesh, L.ex);
+  if (L.hx) hwyDecorate(mesh, L.hx);
   const rs = roadStrip(cx, cz);
   rs.meshes.forEach(m => mesh.add(m));
   addLamps(mesh, rs.lamps);
