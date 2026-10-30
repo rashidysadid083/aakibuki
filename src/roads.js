@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { bands, dummy } from './core.js';
 import { createRoadTextures } from './textures.js';
-import { heightAt, distAxis, roadCoord, zoneAt } from './terrain.js';
+import { heightAt, distAxis, roadCoord, zoneAt, isHwyRoad, HWY_Z } from './terrain.js';
 import { CS, SP } from './config.js';
 import { tinted, combine, addProps } from './props.js';
 
 // ---------- রাস্তা: ৪ ধরন + ফুটপাত, কার্ব, জেব্রা, স্পিড ব্রেকার, বাতিস্তম্ভ ----------
 const mkRoad = (map, off) => new THREE.MeshToonMaterial({ map, vertexColors: true, gradientMap: bands, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: off, polygonOffsetUnits: off });
 const ONE = new THREE.Color(1, 1, 1), EDGE_C = new THREE.Color(0x3b3229), WHITE = new THREE.Color(0xf4f0e6), YEL = new THREE.Color(0xe0b13a), CURB = new THREE.Color(0x8d887e);
-function roadType(x, z) { const q = zoneAt(x, z); return q > 0.85 ? 'slab' : q > 0.5 ? 'asphalt' : q > 0.3 ? 'brick' : 'dirt'; }
+const roadTypeQ = q => q > 0.85 ? 'slab' : q > 0.5 ? 'asphalt' : q > 0.3 ? 'brick' : 'dirt';
 
 export let ROADM, LAMP, lampGeo, streetMat;
 export function initRoads() {
@@ -41,7 +41,8 @@ export function roadStrip(cx, cz) {
       const xb = axis === 'z' ? cb : t + seg, zb = axis === 'z' ? t + seg : cb;
       const ya = heightAt(xa, za) + 0.08, yb = heightAt(xb, zb) + 0.08;
       const other = distAxis(axis === 'z' ? 'x' : 'z', (xa + xb) / 2, (za + zb) / 2); // মোড়ের দূরত্ব
-      const ty = roadType((xa + xb) / 2, (za + zb) / 2), urban = ty !== 'dirt', ta = axis === 'z' ? za : xa, tb = axis === 'z' ? zb : xb;
+      const zq = zoneAt((xa + xb) / 2, (za + zb) / 2), hw = zq < HWY_Z && isHwyRoad(axis, idx); // ৪ঘ হাইওয়ে-টুকরো
+      const ty = hw ? 'asphalt' : roadTypeQ(zq), urban = ty !== 'dirt' && !hw, ta = axis === 'z' ? za : xa, tb = axis === 'z' ? zb : xb;
       const P = (o, dy, e) => axis === 'z' ? [(e ? xb : xa) + o, (e ? yb : ya) + dy, e ? zb : za] : [e ? xb : xa, (e ? yb : ya) + dy, (e ? zb : za) + o];
       const quad = (k, A, B, D, E, c, u1, u2) => {
         const g = G[k];
@@ -51,14 +52,15 @@ export function roadStrip(cx, cz) {
       const wall = (k, o, d0, d1, c) => quad(k, P(o, d0, 0), P(o, d1, 0), P(o, d0, 1), P(o, d1, 1), c, 0, 0.1);
       band(ty, -3.2, 3.2, ONE, 0);
       if (other > 3.8) {
-        if (!urban) { band('paint', -3.2, -2.9, EDGE_C, 0.03); band('paint', 2.9, 3.2, EDGE_C, 0.03); }
+        if (hw) { band('paint', -3.05, -2.85, WHITE, 0.03); band('paint', 2.85, 3.05, WHITE, 0.03); band('paint', -0.2, -0.07, YEL, 0.03); band('paint', 0.07, 0.2, YEL, 0.03); } // কিনারার সাদা দাগ + মাঝে দুই হলুদ দাগ
+        else if (!urban) { band('paint', -3.2, -2.9, EDGE_C, 0.03); band('paint', 2.9, 3.2, EDGE_C, 0.03); }
         else if (other > 5) for (const s of [1, -1]) { band('walk', s * 3.2, s * 4.8, ONE, 0.16); wall('paint', s * 3.2, 0, 0.16, CURB); } // ফুটপাত + কার্ব
       }
-      if (ty === 'asphalt' && other > 5 && ((ta / seg) | 0) % 2 === 0) band('paint', -0.1, 0.1, WHITE, 0.03); // লেন-মার্কিং
+      if (ty === 'asphalt' && !hw && other > 5 && ((ta / seg) | 0) % 2 === 0) band('paint', -0.1, 0.1, WHITE, 0.03); // লেন-মার্কিং
       if (urban && other > 8 && other < 10) for (let k = -3; k < 3; k++) band('paint', k + 0.1, k + 0.9, WHITE, 0.04); // জেব্রা ক্রসিং
       if (urban && other > 13 && other < 15) band('paint', -3.2, 3.2, YEL, 0.09); // স্পিড ব্রেকার
       const n11 = Math.round(ta / seg);
-      if (urban && other > 7 && n11 % 11 === 0) { const q = P((Math.abs(n11 / 11) % 2 ? 1 : -1) * 5.2, 0, 0); lamps.push({ x: q[0], y: q[1] + 0.1, z: q[2], ry: 0, s: 1 }); } // বাতিস্তম্ভ
+      if ((urban || hw) && other > 7 && n11 % 11 === 0) { const q = P((Math.abs(n11 / 11) % 2 ? 1 : -1) * 5.2, 0, 0); lamps.push({ x: q[0], y: q[1] + 0.1, z: q[2], ry: 0, s: 1 }); } // বাতিস্তম্ভ
     }
   };
   for (const axis of ['z', 'x']) {

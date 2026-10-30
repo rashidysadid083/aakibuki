@@ -53,13 +53,37 @@ export function roadYaw(axis, i, t) { // রাস্তার দিকে ম�
 }
 
 // রাস্তার কাছে জমি সমতল করে দেওয়া, নিচু জায়গায় পানি
+// ---------- ৪ঘ: হাইওয়ে-রাস্তা আর রেললাইন ----------
+// হাইওয়ে: কিছু রাস্তা (প্রায় ৪০%, শূন্য নম্বর নয়) পুরোটাই হাইওয়ে-শ্রেণির; যেখানে এলাকা-মান ০.৩-এর নিচে (মোড় থেকে দূরে) সেখানেই হাইওয়ের চেহারা
+export const HWY_Z = 0.3;
+export const isHwyRoad = (axis, i) => i !== 0 && mulberry32(((i * 51787) ^ (axis === 'z' ? 3 : 5) ^ SEED ^ 0x4119) >>> 0)() < 0.4;
+// রেললাইন: x-দিকে চলা, প্রতি রাস্তা-সারির ঠিক মাঝখানে (z = (j+0.5)*SP), ঢেউ খেলানো, প্রায় ৪০% সারিতে
+export const railOn = j => mulberry32(((j * 48271) ^ SEED ^ 0x7a11) >>> 0)() < 0.4;
+export const railZ = (j, x) => (j + 0.5) * SP + Math.sin(x * 0.007 + j * 2.3) * 12;
+export function railDist(x, z) { // সবচেয়ে কাছের রেললাইন থেকে দূরত্ব (নেই হলে 1e9); সারি নম্বর RAIL_J-তে
+  const j = Math.round(z / SP - 0.5);
+  if (!railOn(j)) return 1e9;
+  RAIL_J.j = j;
+  return Math.abs(z - railZ(j, x));
+}
+export const RAIL_J = { j: 0 };
+
 export function heightAt(x, z) {
   nearestRoad(x, z);
   const h = rawHeight(x, z);
-  if (NR.d >= 32) return Math.max(h, WATER);
-  const t = THREE.MathUtils.smoothstep(NR.d, 5, 32); // রাস্তা সবসময় সমতল-স্তরে, টিলা পাশে ধীরে ওঠে
-  const rc = NR.axis === 'z' ? baseHeight(NR.cross, z) : baseHeight(x, NR.cross);
-  return Math.max(THREE.MathUtils.lerp(Math.max(rc, WATER + 0.8), h, t), WATER);
+  let out;
+  if (NR.d >= 32) out = Math.max(h, WATER);
+  else {
+    const t = THREE.MathUtils.smoothstep(NR.d, 5, 32); // রাস্তা সবসময় সমতল-স্তরে, টিলা পাশে ধীরে ওঠে
+    const rc = NR.axis === 'z' ? baseHeight(NR.cross, z) : baseHeight(x, NR.cross);
+    out = Math.max(THREE.MathUtils.lerp(Math.max(rc, WATER + 0.8), h, t), WATER);
+  }
+  const dr = railDist(x, z); // রেললাইনের নিচেও জমি সমতল; রাস্তার সাথে মিলনে একই baseHeight, তাই ক্রসিং সমান
+  if (dr < 22) {
+    const rb = Math.max(baseHeight(x, railZ(RAIL_J.j, x)), WATER + 0.8);
+    out = Math.max(THREE.MathUtils.lerp(rb, out, THREE.MathUtils.smoothstep(dr, 3, 22)), WATER);
+  }
+  return out;
 }
 export function surfaceAt(x, z) {
   if (heightAt(x, z) <= WATER + 0.05) return 'water';

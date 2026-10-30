@@ -1,53 +1,72 @@
 import * as THREE from 'three';
 import { scene, bands } from './core.js';
-import { CS, CSEG, STEP, WATER } from './config.js';
+import { CS, CSEG, STEP, WATER, FEAT } from './config.js';
 import { mulberry32, SEED } from './rng.js';
 import { simplex } from './noise.js';
-import { heightAt, surfaceAt, nearestRoad, NR, roadYaw, zoneAt } from './terrain.js';
+import { heightAt, surfaceAt, nearestRoad, NR, roadYaw, zoneAt, railDist } from './terrain.js';
 import { addProps, TREE, BLD } from './props.js';
 import { roadStrip, addLamps } from './roads.js';
 import { washTexture } from './textures.js';
 import { GS } from './state.js';
+import { villageExtras, villageDecorate } from './village.js';
+import { isBazaar, bazaarLayout, bazaarDecorate } from './bazaar.js';
+import { TOWER } from './town.js';
+import { hwyLayout, hwyDecorate } from './highway.js';
 
 const PADDY = new THREE.Color(0xc4cf72);
+
+// সবচেয়ে কাছের রাস্তার দিকে মুখ ঘোরানোর কোণ (এইমাত্র surfaceAt/nearestRoad ডাকার পর NR ঠিক থাকে)
+function faceRoad(x, z) {
+  const rx = NR.axis === 'z' ? NR.cross : x, rz = NR.axis === 'z' ? z : NR.cross;
+  return Math.atan2(rx - x, rz - z);
+}
 
 // প্রতি chunk-এ নিজস্ব seed দিয়ে গাছ-বাড়ি বসায়, তাই ফিরে এলেও একই জিনিস দেখা যাবে
 function layout(cx, cz) {
   const r = mulberry32(((cx * 73856093) ^ (cz * 19349663) ^ SEED) >>> 0);
   const x0 = cx * CS, z0 = cz * CS;
   const zone = zoneAt(x0 + CS / 2, z0 + CS / 2);
-  const kind = zone > 0.5 ? 'town' : zone > 0.05 ? 'village' : 'rural';
-  const cap = { town: 8, village: 5, rural: 0 }[kind];
-  const gap = kind === 'town' ? 8.5 : 7.5;
   const buildings = [], trees = [], cols = [];
+  let kind = zone > 0.5 ? 'town' : zone > 0.05 ? 'village' : 'rural';
+  if (FEAT.bazaar && isBazaar(cx, cz)) kind = 'bazaar'; // ৪খ: মোড়ের বাজার
+  const hx = FEAT.highway ? hwyLayout(cx, cz, cols, trees) : null; // ৪ঘ: গার্ডরেল, গাছের সারি, ওভারব্রিজ, রেললাইন, ক্রসিং
+  if (hx && hx.hasHwy && kind !== 'bazaar') kind = 'highway'; // হাইওয়ের chunk-এ বাড়ি নেই
+  const newTown = FEAT.town && kind === 'town'; // ৪গ: বাস্তব মাপের বহুতল দালান
+  const cap = { town: 8, village: 5, rural: 0, bazaar: 0, highway: 0 }[kind];
+  const gap = newTown ? 9.2 : kind === 'town' ? 8.5 : 7.5;
   for (let i = 0; i < 30 && buildings.length < cap; i++) {
     const x = x0 + r() * CS, z = z0 + r() * CS, a = r(), b = r();
-    if (surfaceAt(x, z) !== 'grass' || NR.d < 7 || NR.d > 17) continue;
-    if (buildings.some(o => Math.hypot(o.x - x, o.z - z) < gap)) continue;
-    const ry = roadYaw(NR.axis, NR.idx, NR.t) + (a - 0.5) * 0.2;
-    const s = kind === 'town' ? 0.9 + b * 0.5 : 0.9 + b * 0.25;
-    const y = Math.min(heightAt(x - 2.5, z - 2.5), heightAt(x + 2.5, z - 2.5), heightAt(x - 2.5, z + 2.5), heightAt(x + 2.5, z + 2.5)) - 0.1;
-    const type = kind === 'town' ? (a > 0.5 ? 'A' : 'B') : 'H';
+    if (surfaceAt(x, z) !== 'grass' || NR.d < (newTown ? 9 : 7) || NR.d > (newTown ? 19 : 17)) continue; // বহুতলের কিনারা যেন ফুটপাত না ঢাকে
+    if (buildings.some(o => Math.hypot(o.x - x, o.z - z) < gap) || railDist(x, z) < 9) continue; // রেললাইনের গায়ে বাড়ি নয়
+    const ry = newTown ? faceRoad(x, z) : roadYaw(NR.axis, NR.idx, NR.t) + (a - 0.5) * 0.2; // শহরে সামনের দিক রাস্তামুখী
+    const s = newTown ? 1 : kind === 'town' ? 0.9 + b * 0.5 : 0.9 + b * 0.25; // বহুতলে মাপ বদলায় না, নইলে জানালার মাপ বিগড়ায়
+    const o = newTown ? 3.5 : 2.5;
+    const y = Math.min(heightAt(x - o, z - o), heightAt(x + o, z - o), heightAt(x - o, z + o), heightAt(x + o, z + o)) - 0.1;
+    const u = (a * 977) % 1;
+    const type = newTown ? (u < 0.4 ? 'A' : u < 0.62 ? 'B' : 'D') : kind === 'town' ? (a > 0.5 ? 'A' : 'B') : u < 0.65 ? 'C' : 'H'; // গ্রামে বেশিরভাগ চালা ঘর
     buildings.push({ x, z, y, s, type, ry });
-    cols.push({ x, z, r: (type === 'H' ? 3.3 : 3.5) * s });
+    cols.push(newTown ? { x, z, r: TOWER[type].r, hh: TOWER[type].hh } : { x, z, r: (type === 'H' ? 3.3 : type === 'C' ? 3.1 : 3.5) * s });
   }
-  const tries = { town: 4, village: 10, rural: 14 }[kind];
+  const tries = { town: 4, village: 10, rural: 14, bazaar: 0, highway: 6 }[kind];
   for (let i = 0; i < tries; i++) {
     const x = x0 + r() * CS, z = z0 + r() * CS, s = 0.8 + r() * 0.7, ry = r() * 6.283;
-    if (surfaceAt(x, z) !== 'grass' || NR.d < 5.5) continue;
-    if (buildings.some(o => Math.hypot(o.x - x, o.z - z) < 6)) continue;
+    if (surfaceAt(x, z) !== 'grass' || NR.d < (kind === 'highway' ? 11 : 5.5) || railDist(x, z) < 7) continue; // হাইওয়ের সারির জায়গা ছেড়ে
+    if (buildings.some(o => Math.hypot(o.x - x, o.z - z) < (newTown ? 7.5 : 6))) continue;
     trees.push({ x, z, y: heightAt(x, z), ry, s });
     cols.push({ x, z, r: 0.6 * s });
   }
-  return { kind, buildings, trees, cols };
+  const ex = kind === 'bazaar' ? bazaarLayout(cx, cz, cols) : kind === 'town' || !FEAT.village ? null : villageExtras(r, kind, x0, z0, buildings, trees, cols); // ৪খ বাজার / ৪ক পুকুর, ধানক্ষেত, বট, কলা, বাঁশ
+  return { kind, buildings, trees, cols, ex, hx };
 }
 
 // শহরের দুই ধরনের বাড়ি (ওপরে নিচের অংশ এক জিওমেট্রিতে)
 
 function decorate(mesh, cx, cz) {
   const L = layout(cx, cz);
-  for (const type of ['H', 'A', 'B']) addProps(mesh, BLD[type], L.buildings.filter(b => b.type === type), 0.1);
+  for (const type of ['H', 'C', 'A', 'B', 'D']) addProps(mesh, BLD[type], L.buildings.filter(b => b.type === type), 0.1);
   addProps(mesh, TREE, L.trees, 0.08);
+  if (L.ex) (L.kind === 'bazaar' ? bazaarDecorate : villageDecorate)(mesh, L.ex);
+  if (L.hx) hwyDecorate(mesh, L.hx);
   const rs = roadStrip(cx, cz);
   rs.meshes.forEach(m => mesh.add(m));
   addLamps(mesh, rs.lamps);
@@ -55,9 +74,8 @@ function decorate(mesh, cx, cz) {
 }
 
 // যেকোনো বিন্দু p আর ব্যাসার্ধ rad নিয়ে আশপাশের chunk-এর বস্তু থেকে ঠেলে বাইরে সরায়; ধাক্কা লাগলে true
-
-// যেকোনো বিন্দু p আর ব্যাসার্ধ rad নিয়ে আশপাশের chunk-এর বস্তু থেকে ঠেলে বাইরে সরায়; ধাক্কা লাগলে true
-export function collide(p, rad) {
+// h = মাটি থেকে নিজের উচ্চতা (উড়ানে); বস্তুর উচ্চতা (hh, না থাকলে ৬) ছাড়ালে ধাক্কা লাগে না
+export function collide(p, rad, h = 0) {
   let hit = false;
   const cx = Math.floor(p.x / CS), cz = Math.floor(p.z / CS);
   for (let dz = -1; dz <= 1; dz++) {
@@ -65,6 +83,7 @@ export function collide(p, rad) {
       const ch = chunks.get((cx + dx) + ',' + (cz + dz));
       if (!ch || !ch.userData.cols) continue;
       for (const c of ch.userData.cols) {
+        if (h > (c.hh === undefined ? 6 : c.hh)) continue;
         const ox = p.x - c.x, oz = p.z - c.z;
         const d = Math.hypot(ox, oz), min = c.r + rad;
         if (d < min && d > 0.001) {
